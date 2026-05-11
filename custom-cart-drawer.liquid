@@ -1,0 +1,33 @@
+<div id="custom-cart-overlay" class="custom-cart-overlay"></div>
+
+<div id="custom-cart-drawer" class="custom-cart-drawer" role="dialog" aria-label="Cart" aria-hidden="true">
+
+  <!-- HEADER -->
+  <div class="custom-cart-drawer__header">
+    <h2 class="custom-cart-drawer__title">Your Cart</h2>
+    <button id="custom-cart-close" class="custom-cart-drawer__close" aria-label="Close cart">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"/>
+        <line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ITEMS — filled dynamically by JS -->
+  <div id="custom-cart-items" class="custom-cart-drawer__items"></div>
+
+  <!-- EMPTY STATE -->
+  <div id="custom-cart-empty" class="custom-cart-drawer__empty">
+    <p>Your cart is empty.</p>
+  </div>
+
+  <!-- FOOTER -->
+  <div id="custom-cart-footer" class="custom-cart-drawer__footer">
+    <div class="custom-cart-drawer__subtotal">
+      <span>Subtotal</span>
+      <span id="custom-cart-subtotal">—</span>
+    </div>
+    <a href="/checkout" class="custom-cart-drawer__checkout">Checkout</a>
+  </div>
+
+</div>
