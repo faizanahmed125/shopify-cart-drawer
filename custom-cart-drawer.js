@@ -1,23 +1,71 @@
-(function () {
-
-  // ── ELEMENT REFERENCES ────────────────────────────────────────────────────
-  const drawer   = document.getElementById('custom-cart-drawer');
-  const overlay  = document.getElementById('custom-cart-overlay');
-  const closeBtn = document.getElementById('custom-cart-close');
-  const itemsCon = document.getElementById('custom-cart-items');
-  const emptyEl  = document.getElementById('custom-cart-empty');
-  const footerEl = document.getElementById('custom-cart-footer');
-  const subtotal = document.getElementById('custom-cart-subtotal');
-
-  // if the snippet isn't on this page, stop here
+(() => {
+  const drawer = document.getElementById('custom-cart-drawer');
   if (!drawer) return;
 
-  // ── OPEN / CLOSE ──────────────────────────────────────────────────────────
+  const overlay = document.getElementById('custom-cart-overlay');
+  const closeButton = document.getElementById('custom-cart-close');
+  const itemsContainer = document.getElementById('custom-cart-items');
+  const emptyState = document.getElementById('custom-cart-empty');
+  const footer = document.getElementById('custom-cart-footer');
+  const subtotal = document.getElementById('custom-cart-subtotal');
+  const status = document.getElementById('custom-cart-status');
+  const routesRoot = window.Shopify?.routes?.root || '/';
+  const moneyFormat = drawer.dataset.moneyFormat || '$' + '{{amount}}';
+
+  let previouslyFocusedElement = null;
+
+  function formatWithDelimiters(cents, precision = 2, thousands = ',', decimal = '.') {
+    const value = Number(cents);
+    if (!Number.isFinite(value)) return '0';
+
+    const fixed = (value / 100).toFixed(precision);
+    const parts = fixed.split('.');
+    const dollars = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, thousands);
+    return parts[1] ? dollars + decimal + parts[1] : dollars;
+  }
+
+  function formatMoney(cents) {
+    const match = moneyFormat.match(/\{\{\s*(\w+)\s*\}\}/);
+    const placeholder = match?.[1] || 'amount';
+    let value;
+
+    switch (placeholder) {
+      case 'amount_no_decimals':
+        value = formatWithDelimiters(cents, 0);
+        break;
+      case 'amount_with_comma_separator':
+        value = formatWithDelimiters(cents, 2, '.', ',');
+        break;
+      case 'amount_no_decimals_with_comma_separator':
+        value = formatWithDelimiters(cents, 0, '.', ',');
+        break;
+      case 'amount_with_apostrophe_separator':
+        value = formatWithDelimiters(cents, 2, "'", '.');
+        break;
+      default:
+        value = formatWithDelimiters(cents);
+    }
+
+    return moneyFormat.replace(match?.[0] || '{{amount}}', value);
+  }
+
+  function setStatus(message = '', isError = false) {
+    status.textContent = message;
+    status.classList.toggle('is-error', isError);
+  }
+
+  function setBusy(isBusy) {
+    drawer.setAttribute('aria-busy', String(isBusy));
+    itemsContainer.classList.toggle('is-loading', isBusy);
+  }
+
   function openDrawer() {
+    previouslyFocusedElement = document.activeElement;
     drawer.classList.add('is-open');
     overlay.classList.add('is-visible');
     drawer.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('cart-drawer-open'); // locks page scroll
+    document.body.classList.add('cart-drawer-open');
+    window.requestAnimationFrame(() => closeButton.focus());
   }
 
   function closeDrawer() {
@@ -26,220 +74,246 @@
     drawer.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('cart-drawer-open');
     closeAllPopovers();
-  }
 
-  closeBtn.addEventListener('click', closeDrawer);
-  overlay.addEventListener('click', closeDrawer);  // click outside = close
-
-  // ── FETCH CART DATA ───────────────────────────────────────────────────────
-  // /cart.js returns the full cart as JSON — items, totals, count etc.
-  function fetchCart() {
-    return fetch('/cart.js').then(res => res.json());
-  }
-
-  // ── FORMAT PRICE ─────────────────────────────────────────────────────────
-  // Shopify stores prices in CENTS (e.g. 1000 = $10.00)
-  function formatPrice(cents) {
-    return '$' + (cents / 100).toFixed(2);
-  }
-
-  // ── RENDER CART ───────────────────────────────────────────────────────────
-  function renderCart(cart) {
-    // clear previous items
-    itemsCon.innerHTML = '';
-
-    if (cart.item_count === 0) {
-      // show empty state, hide items + footer
-      emptyEl.style.display  = 'flex';
-      footerEl.style.display = 'none';
-      return;
+    if (previouslyFocusedElement instanceof HTMLElement) {
+      previouslyFocusedElement.focus();
     }
+  }
 
-    // hide empty state, show footer
-    emptyEl.style.display  = 'none';
-    footerEl.style.display = 'block';
-
-    // render each item
-    cart.items.forEach(item => {
-      itemsCon.insertAdjacentHTML('beforeend', buildItemHTML(item));
+  async function requestCart(path = 'cart.js', options = {}) {
+    const response = await fetch(routesRoot + path, {
+      headers: {
+        Accept: 'application/json',
+        ...(options.headers || {})
+      },
+      ...options
     });
 
-    // update subtotal
-    subtotal.textContent = formatPrice(cart.total_price);
-
-    // update the cart icon bubble in Dawn's header
-    updateCartBubble(cart.item_count);
-  }
-
-  // ── BUILD ITEM HTML ───────────────────────────────────────────────────────
-  // Builds a string of HTML for one cart item.
-  // data-key is the cart line item key Shopify uses to identify each line
-  function buildItemHTML(item) {
-    const image = item.image || '';
-
-    // only show variant title if it's not the default
-    const variantHTML = (item.variant_title && item.variant_title !== 'Default Title')
-      ? `<p class="custom-cart-item__variant">${item.variant_title}</p>`
-      : '';
-
-    return `
-      <div class="custom-cart-item" data-key="${item.key}">
-
-        <div class="custom-cart-item__image-wrap">
-          <img src="${image}" alt="${item.title}" class="custom-cart-item__image" />
-        </div>
-
-        <div class="custom-cart-item__details">
-          <p class="custom-cart-item__title">${item.title}</p>
-          ${variantHTML}
-          <p class="custom-cart-item__price">${formatPrice(item.line_price)}</p>
-
-          <div class="custom-cart-item__actions">
-
-            <!-- QUANTITY POPOVER TRIGGER + POPOVER -->
-            <div class="quantity-popover-wrapper">
-
-              <!-- clicking this button opens the popover -->
-              <button class="quantity-popover-trigger" data-key="${item.key}">
-                Qty: <span class="quantity-popover-value">${item.quantity}</span>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-              </button>
-
-              <!-- the floating panel — hidden until trigger is clicked -->
-              <div class="quantity-popover" data-key="${item.key}" aria-hidden="true">
-                <button class="quantity-popover__btn" data-action="decrease" data-key="${item.key}">−</button>
-                <span class="quantity-popover__count">${item.quantity}</span>
-                <button class="quantity-popover__btn" data-action="increase" data-key="${item.key}">+</button>
-              </div>
-
-            </div>
-
-            <!-- REMOVE BUTTON -->
-            <button class="custom-cart-item__remove" data-key="${item.key}">Remove</button>
-
-          </div>
-        </div>
-
-      </div>
-    `;
-  }
-
-  // ── POPOVER OPEN / CLOSE ──────────────────────────────────────────────────
-  function openPopover(key) {
-    closeAllPopovers(); // close any other open popovers first
-    const popover = itemsCon.querySelector(`.quantity-popover[data-key="${key}"]`);
-    if (popover) {
-      popover.classList.add('is-open');
-      popover.setAttribute('aria-hidden', 'false');
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.description || data.message || 'Cart request failed.');
     }
+
+    return data;
+  }
+
+  function createElement(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+
+  function createCartItem(item) {
+    const itemElement = createElement('article', 'custom-cart-item');
+    itemElement.dataset.key = item.key;
+
+    const imageWrapper = createElement('div', 'custom-cart-item__image-wrap');
+    if (item.image) {
+      const image = createElement('img', 'custom-cart-item__image');
+      image.src = item.image;
+      image.alt = item.product_title || item.title || '';
+      image.loading = 'lazy';
+      imageWrapper.appendChild(image);
+    }
+
+    const details = createElement('div', 'custom-cart-item__details');
+    details.appendChild(createElement('p', 'custom-cart-item__title', item.product_title || item.title));
+
+    if (item.variant_title && item.variant_title !== 'Default Title') {
+      details.appendChild(createElement('p', 'custom-cart-item__variant', item.variant_title));
+    }
+
+    details.appendChild(createElement('p', 'custom-cart-item__price', formatMoney(item.final_line_price)));
+
+    const actions = createElement('div', 'custom-cart-item__actions');
+    const quantityWrapper = createElement('div', 'quantity-popover-wrapper');
+    const trigger = createElement('button', 'quantity-popover-trigger');
+    trigger.type = 'button';
+    trigger.dataset.key = item.key;
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-label', `Change quantity for ${item.product_title || item.title}`);
+    trigger.append('Qty: ', createElement('span', 'quantity-popover-value', item.quantity), ' ▾');
+
+    const popover = createElement('div', 'quantity-popover');
+    popover.dataset.key = item.key;
+    popover.setAttribute('aria-hidden', 'true');
+
+    const decrease = createElement('button', 'quantity-popover__btn', '−');
+    decrease.type = 'button';
+    decrease.dataset.action = 'decrease';
+    decrease.dataset.key = item.key;
+    decrease.setAttribute('aria-label', 'Decrease quantity');
+
+    const count = createElement('span', 'quantity-popover__count', item.quantity);
+
+    const increase = createElement('button', 'quantity-popover__btn', '+');
+    increase.type = 'button';
+    increase.dataset.action = 'increase';
+    increase.dataset.key = item.key;
+    increase.setAttribute('aria-label', 'Increase quantity');
+
+    popover.append(decrease, count, increase);
+    quantityWrapper.append(trigger, popover);
+
+    const remove = createElement('button', 'custom-cart-item__remove', 'Remove');
+    remove.type = 'button';
+    remove.dataset.key = item.key;
+    remove.setAttribute('aria-label', `Remove ${item.product_title || item.title} from cart`);
+
+    actions.append(quantityWrapper, remove);
+    details.appendChild(actions);
+    itemElement.append(imageWrapper, details);
+
+    return itemElement;
+  }
+
+  function renderCart(cart) {
+    itemsContainer.replaceChildren();
+
+    const hasItems = cart.item_count > 0;
+    emptyState.style.display = hasItems ? 'none' : 'flex';
+    footer.style.display = hasItems ? 'block' : 'none';
+
+    if (hasItems) {
+      const fragment = document.createDocumentFragment();
+      cart.items.forEach((item) => fragment.appendChild(createCartItem(item)));
+      itemsContainer.appendChild(fragment);
+      subtotal.textContent = formatMoney(cart.total_price);
+    }
+
+    updateCartBubble(cart.item_count);
+    document.dispatchEvent(new CustomEvent('custom-cart:updated', { detail: cart }));
+  }
+
+  function openPopover(key) {
+    closeAllPopovers();
+    const popover = [...itemsContainer.querySelectorAll('.quantity-popover')]
+      .find((element) => element.dataset.key === key);
+
+    if (!popover) return;
+
+    popover.classList.add('is-open');
+    popover.setAttribute('aria-hidden', 'false');
+    popover.previousElementSibling?.setAttribute('aria-expanded', 'true');
   }
 
   function closeAllPopovers() {
-    itemsCon.querySelectorAll('.quantity-popover.is-open').forEach(p => {
-      p.classList.remove('is-open');
-      p.setAttribute('aria-hidden', 'true');
+    itemsContainer.querySelectorAll('.quantity-popover.is-open').forEach((popover) => {
+      popover.classList.remove('is-open');
+      popover.setAttribute('aria-hidden', 'true');
+      popover.previousElementSibling?.setAttribute('aria-expanded', 'false');
     });
   }
 
-  // close popovers if user clicks anywhere outside a popover wrapper
-  document.addEventListener('click', function (e) {
-    if (!e.target.closest('.quantity-popover-wrapper')) {
+  async function updateQuantity(key, quantity) {
+    setBusy(true);
+    setStatus('Updating cart…');
+
+    try {
+      const cart = await requestCart('cart/change.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: key, quantity })
+      });
+      renderCart(cart);
+      setStatus(quantity === 0 ? 'Item removed.' : 'Cart updated.');
+    } catch (error) {
+      console.error('Cart update error:', error);
+      setStatus(error.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function updateCartBubble(count) {
+    const cartLink = document.getElementById('cart-icon-bubble');
+    if (!cartLink) return;
+
+    let bubble = cartLink.querySelector('.cart-count-bubble');
+
+    if (count < 1) {
+      bubble?.remove();
+      return;
+    }
+
+    if (!bubble) {
+      bubble = createElement('div', 'cart-count-bubble');
+      bubble.append(createElement('span'), createElement('span', 'visually-hidden'));
+      bubble.firstElementChild.setAttribute('aria-hidden', 'true');
+      cartLink.appendChild(bubble);
+    }
+
+    bubble.firstElementChild.textContent = count;
+    bubble.lastElementChild.textContent = `${count} ${count === 1 ? 'item' : 'items'}`;
+  }
+
+  closeButton.addEventListener('click', closeDrawer);
+  overlay.addEventListener('click', closeDrawer);
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && drawer.classList.contains('is-open')) {
+      closeDrawer();
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.quantity-popover-wrapper')) {
       closeAllPopovers();
     }
   });
 
-  // ── EVENT DELEGATION ──────────────────────────────────────────────────────
-  // Instead of adding a click listener to EVERY button in every item,
-  // we add ONE listener to the parent container.
-  // When a click happens, we check what was actually clicked using .closest()
-  itemsCon.addEventListener('click', function (e) {
-
-    // -- Was the POPOVER TRIGGER clicked? --
-    const trigger = e.target.closest('.quantity-popover-trigger');
+  itemsContainer.addEventListener('click', (event) => {
+    const trigger = event.target.closest('.quantity-popover-trigger');
     if (trigger) {
-      e.stopPropagation(); // don't let this bubble up to the document listener
-      const key = trigger.dataset.key;
-      const popover = itemsCon.querySelector(`.quantity-popover[data-key="${key}"]`);
-      // toggle: if already open → close it, if closed → open it
-      if (popover.classList.contains('is-open')) {
-        closeAllPopovers();
-      } else {
-        openPopover(key);
-      }
+      event.stopPropagation();
+      const isOpen = trigger.getAttribute('aria-expanded') === 'true';
+      isOpen ? closeAllPopovers() : openPopover(trigger.dataset.key);
       return;
     }
 
-    // -- Was a + or − BUTTON inside the popover clicked? --
-    const qtyBtn = e.target.closest('.quantity-popover__btn');
-    if (qtyBtn) {
-      e.stopPropagation();
-      const key    = qtyBtn.dataset.key;
-      const action = qtyBtn.dataset.action; // "increase" or "decrease"
+    const quantityButton = event.target.closest('.quantity-popover__btn');
+    if (quantityButton) {
+      event.stopPropagation();
+      const popover = quantityButton.closest('.quantity-popover');
+      const currentQuantity = Number.parseInt(
+        popover.querySelector('.quantity-popover__count').textContent,
+        10
+      );
+      const nextQuantity = quantityButton.dataset.action === 'increase'
+        ? currentQuantity + 1
+        : currentQuantity - 1;
 
-      // read the current quantity from the popover's count display
-      const countEl  = qtyBtn.closest('.quantity-popover').querySelector('.quantity-popover__count');
-      const currentQty = parseInt(countEl.textContent);
-
-      const newQty = action === 'increase' ? currentQty + 1 : currentQty - 1;
-
-      if (newQty < 1) {
-        removeItem(key);  // quantity hit 0 → remove the item entirely
-      } else {
-        updateQuantity(key, newQty);
-      }
+      updateQuantity(quantityButton.dataset.key, Math.max(nextQuantity, 0));
       return;
     }
 
-    // -- Was the REMOVE button clicked? --
-    const removeBtn = e.target.closest('.custom-cart-item__remove');
-    if (removeBtn) {
-      removeItem(removeBtn.dataset.key);
-      return;
+    const removeButton = event.target.closest('.custom-cart-item__remove');
+    if (removeButton) {
+      updateQuantity(removeButton.dataset.key, 0);
     }
-
   });
 
-  // ── UPDATE QUANTITY ───────────────────────────────────────────────────────
-  // /cart/change.js updates a line item by key and returns the updated cart
-  function updateQuantity(key, quantity) {
-    fetch('/cart/change.js', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: key, quantity: quantity })
-    })
-    .then(res => res.json())
-    .then(cart => renderCart(cart))  // re-render with updated data
-    .catch(err => console.error('Update qty error:', err));
-  }
-
-  // ── REMOVE ITEM ───────────────────────────────────────────────────────────
-  // setting quantity to 0 removes the item from the cart
-  function removeItem(key) {
-    updateQuantity(key, 0);
-  }
-
-  // ── UPDATE CART BUBBLE ────────────────────────────────────────────────────
-  // keeps the count badge on Dawn's header cart icon in sync
-  function updateCartBubble(count) {
-    const bubble = document.getElementById('cart-icon-bubble');
-    if (!bubble) return;
-    bubble.innerHTML = count > 0
-      ? `<span class="visually-hidden">Cart</span><span class="cart-count-bubble">${count}</span>`
-      : `<span class="visually-hidden">Cart</span>`;
-  }
-
-  // ── PUBLIC API ────────────────────────────────────────────────────────────
-  // We expose one method on window so custom-cart.js can call it
-  // after adding the item — it fetches fresh cart data then opens the drawer
   window.CustomCartDrawer = {
-    open: function () {
-      fetchCart().then(function (cart) {
+    async open() {
+      setBusy(true);
+      setStatus('');
+
+      try {
+        const cart = await requestCart();
         renderCart(cart);
         openDrawer();
-      });
+      } catch (error) {
+        console.error('Cart loading error:', error);
+        setStatus(error.message, true);
+        openDrawer();
+      } finally {
+        setBusy(false);
+      }
+    },
+    showError(message) {
+      setStatus(message, true);
+      openDrawer();
     }
   };
-
 })();
