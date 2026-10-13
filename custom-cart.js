@@ -1,62 +1,57 @@
-(function () {
+(() => {
+  const productFormSelector = [
+    'form[data-type="add-to-cart-form"]',
+    'form[action*="/cart/add"]'
+  ].join(',');
 
-  // Target the form, not the button — Dawn intercepts at submit level
-  const form = document.querySelector('form[data-type="add-to-cart-form"]');
-  if (!form) return;
+  const routesRoot = window.Shopify?.routes?.root || '/';
 
-  form.addEventListener('submit', function (e) {
+  document.addEventListener('submit', async (event) => {
+    const form = event.target.closest(productFormSelector);
+    if (!form) return;
 
-    // ✅ Block the native form POST (prevents redirect to /cart page)
-    e.preventDefault();
+    event.preventDefault();
+    event.stopImmediatePropagation();
 
-    // ✅ Kill Dawn's product-form.js submit handler before it fires
-    // Without this, Dawn still intercepts and opens its own drawer
-    e.stopImmediatePropagation();
+    const submitButton = event.submitter || form.querySelector('[type="submit"]');
+    const buttonLabel = submitButton?.querySelector('span');
+    const originalLabel = buttonLabel?.textContent;
 
-    // Read variant ID from Dawn's hidden input
-    // This value auto-updates when customer selects a different variant
-    const variantInput = form.querySelector('input.product-variant-id');
-    const variantId = variantInput ? variantInput.value : null;
+    if (submitButton) submitButton.disabled = true;
+    if (buttonLabel) buttonLabel.textContent = 'Adding…';
 
-    if (!variantId) {
-      console.error('No variant ID found on this form');
-      return;
-    }
+    try {
+      const formData = new FormData(form);
+      const response = await fetch(routesRoot + 'cart/add.js', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        body: formData
+      });
 
-    // Grab the button to show loading state
-    const button = form.querySelector('button[name="add"]');
-    const buttonSpan = button ? button.querySelector('span') : null;
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.description || result.message || 'Unable to add this item.');
+      }
 
-    if (button) {
-      button.disabled = true;
-      if (buttonSpan) buttonSpan.textContent = 'Adding...';
-    }
+      if (!window.CustomCartDrawer) {
+        throw new Error('The cart drawer script is not loaded.');
+      }
 
-    fetch('/cart/add.js', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: variantId, quantity: 1 })
-    })
-    .then(function () {
-      // Fetch fresh cart data and open YOUR drawer
+      await window.CustomCartDrawer.open();
+    } catch (error) {
+      console.error('Add-to-cart error:', error);
+
       if (window.CustomCartDrawer) {
-        window.CustomCartDrawer.open();
+        window.CustomCartDrawer.showError(error.message);
       } else {
-        console.warn('CustomCartDrawer not found — check custom-cart-drawer.js is loaded');
+        form.dispatchEvent(new CustomEvent('custom-cart:error', {
+          bubbles: true,
+          detail: { message: error.message }
+        }));
       }
-    })
-    .catch(function (err) {
-      console.error('Cart add error:', err);
-    })
-    .finally(function () {
-      if (button) {
-        button.disabled = false;
-        if (buttonSpan) buttonSpan.textContent = 'Add to Cart';
-      }
-    });
-
-  // ⚠️ useCapture: true — runs YOUR listener BEFORE Dawn's listener
-  // This is the key to winning the race against product-form.js
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+      if (buttonLabel && originalLabel) buttonLabel.textContent = originalLabel;
+    }
   }, true);
-
 })();
