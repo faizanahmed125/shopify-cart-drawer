@@ -82,11 +82,11 @@
 
   async function requestCart(path = 'cart.js', options = {}) {
     const response = await fetch(routesRoot + path, {
+      ...options,
       headers: {
         Accept: 'application/json',
         ...(options.headers || {})
-      },
-      ...options
+      }
     });
 
     const data = await response.json();
